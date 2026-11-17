@@ -1,6 +1,6 @@
 // Guarda o app no aparelho para funcionar sem internet.
 // Ao publicar uma versão nova, troque o número abaixo.
-const CACHE = 'financas-v6';
+const CACHE = 'financas-v8';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

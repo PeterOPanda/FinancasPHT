@@ -90,7 +90,7 @@
   .linkbtn{border:0;background:none;color:var(--accent);font:500 13px var(--sans);cursor:pointer;padding:4px 0}
   .hint{font-size:12.5px;color:var(--muted);margin-top:8px}
   /* listas */
-  .lhead{display:flex;justify-content:space-between;align-items:baseline;margin:4px 2px 8px;font-size:13px;font-weight:600;color:var(--muted)}
+  .lhead{display:flex;gap:10px;justify-content:space-between;align-items:baseline;margin:4px 2px 8px;font-size:13px;font-weight:600;color:var(--muted)}
   .lhead b{font:600 14px var(--mono);color:var(--ink)}
   .list{list-style:none;margin:0 0 14px;padding:0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
   .list li{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--line)}
@@ -159,6 +159,7 @@
       <button class="tab" data-tab="fixas"><span class="ic">↻</span><span><b>Gastos fixos</b><small>Assinaturas, casa, financiamento</small></span></button>
       <button class="tab" data-tab="parcelas"><span class="ic">1/n</span><span><b>Compras parceladas</b><small>Parcelas por cartão</small></span></button>
       <button class="tab" data-tab="gastos"><span class="ic">−R$</span><span><b>Gastos gerais</b><small>Por categoria e forma de pagamento</small></span></button>
+      <button class="tab" data-tab="financ"><span class="ic">⌂</span><span><b>Financiamento</b><small>Parcelas, saldo devedor e quanto falta</small></span></button>
       <button class="tab" data-tab="cartoes"><span class="ic">▭</span><span><b>Cartões de crédito</b><small>Gerais + fixos + parcelas por cartão</small></span></button>
       <button class="tab" data-tab="contas"><span class="ic">✓</span><span><b>Contas gerais</b><small>Marcar o que já foi pago</small></span></button>
       <button class="tab" data-tab="resultado"><span class="ic">Σ</span><span><b>Resultado do mês</b><small>Receitas, gastos e sobra</small></span></button>
@@ -177,6 +178,7 @@
   <section class="panel" id="fixas"></section>
   <section class="panel" id="parcelas"></section>
   <section class="panel" id="gastos"></section>
+  <section class="panel" id="financ"></section>
   <section class="panel" id="cartoes"></section>
   <section class="panel" id="contas"></section>
   <section class="panel" id="resultado"></section>
@@ -188,7 +190,7 @@
 const KEY='financasPHT_v2';
 const MESES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MES3=['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
-const TITULOS={entradas:'Entradas',fixas:'Gastos fixos',parcelas:'Compras parceladas',gastos:'Gastos gerais',cartoes:'Cartões de crédito',contas:'Contas gerais',resultado:'Resultado do mês',ajustes:'Ajustes'};
+const TITULOS={entradas:'Entradas',fixas:'Gastos fixos',parcelas:'Compras parceladas',gastos:'Gastos gerais',financ:'Financiamento',cartoes:'Cartões de crédito',contas:'Contas gerais',resultado:'Resultado do mês',ajustes:'Ajustes'};
 const CORES=['--c1','--c2','--c3','--c4','--c5','--c6','--c7','--c8'];
 
 /* ---------- utilidades ---------- */
@@ -211,7 +213,7 @@ function dataPadrao(){const h=hoje();if(h.slice(0,7)===UI.mes)return h;const[y,m
 
 /* ---------- dados ---------- */
 function padrao(){return{v:2,
-  entradas:[],gastos:[],parcelas:[],fixas:[],fixMes:{},guardado:{},cartPago:{},
+  entradas:[],gastos:[],parcelas:[],fixas:[],fixMes:{},guardado:{},cartPago:{},financ:[],finMes:{},
   catEnt:['Salário / Pró-labore','Projetos','Comissões','Rendimentos','Reembolso','Sobra do mês anterior','Outros'],
   cats:['Mercado','Alimentação','Transporte','Combustível','Saúde','Farmácia','Casa','Contas de casa','Assinaturas','Financiamento','Lazer','Vestuário','Educação','Pets','Presentes','Trabalho','Impostos','Outros'],
   formas:[{id:'pix',nome:'Pix',cartao:false},{id:'deb',nome:'Débito',cartao:false},{id:'din',nome:'Dinheiro',cartao:false},{id:'bol',nome:'Boleto',cartao:false},{id:'dauto',nome:'Débito automático',cartao:false}]
@@ -241,11 +243,29 @@ function regFixa(f,ym){return (S.fixMes[ym]||{})[f.id]||{}}
 function valorFixa(f,ym){const r=regFixa(f,ym);if(r.v!=null)return{v:r.v,est:false};
   if(f.variavel){const ms=Object.keys(S.fixMes).filter(m=>m<ym&&S.fixMes[m][f.id]&&S.fixMes[m][f.id].v!=null).sort();if(ms.length)return{v:S.fixMes[ms.at(-1)][f.id].v,est:true}}
   return{v:f.valor,est:!!f.variavel}}
+// financiamento: parcela k do mês, valor digitado no mês ou último conhecido
+const parcFin=(f,ym)=>{const k=difMes(f.inicio,ym)+1;return k>=1&&k<=f.n?k:0};
+const regFin=(f,ym)=>(S.finMes[ym]||{})[f.id]||{};
+// juros: taxa mensal equivalente
+const taxaMes=f=>!f.juros?0:f.jurosTipo==='am'?f.juros/100:Math.pow(1+f.juros/100,1/12)-1;
+// ponto de partida: último saldo devedor informado antes do mês; senão, o valor financiado
+function baseFin(f,ym){const ms=Object.keys(S.finMes).filter(m=>m<ym&&parcFin(f,m)&&S.finMes[m][f.id]&&S.finMes[m][f.id].saldo!=null).sort();
+  if(ms.length){const m0=ms.at(-1);return{S0:S.finMes[m0][f.id].saldo,rem:f.n-parcFin(f,m0),j:difMes(m0,ym)}}
+  if(f.financiado)return{S0:f.financiado,rem:f.n,j:difMes(f.inicio,ym)+1};return null}
+// parcela e saldo após o pagamento, aproximados (sem TR/IPCA)
+function calcFin(f,ym){const i=taxaMes(f),b=baseFin(f,ym);if(!i||!b||b.rem<=0||b.j<1||b.j>b.rem)return null;
+  let parc,saldo;
+  if(f.sistema==='Price'){const pmt=b.S0*i/(1-Math.pow(1+i,-b.rem));parc=pmt;saldo=b.S0*Math.pow(1+i,b.j)-pmt*(Math.pow(1+i,b.j)-1)/i}
+  else{const A=b.S0/b.rem,antes=b.S0-A*(b.j-1);parc=A+antes*i;saldo=antes-A}
+  return{v:r2(parc+(f.extras||0)),saldo:r2(Math.max(0,saldo))}}
+function valorFin(f,ym){const r=regFin(f,ym);if(r.v!=null)return{v:r.v,est:false};const c=calcFin(f,ym);if(c)return{v:c.v,est:true,calc:true};const ms=Object.keys(S.finMes).filter(m=>m<ym&&S.finMes[m][f.id]&&S.finMes[m][f.id].v!=null).sort();return{v:ms.length?S.finMes[ms.at(-1)][f.id].v:f.valor,est:true}}
+function saldoFin(f,ym){const ms=Object.keys(S.finMes).filter(m=>m<=ym&&S.finMes[m][f.id]&&S.finMes[m][f.id].saldo!=null).sort();return ms.length?{v:S.finMes[ms.at(-1)][f.id].saldo,de:ms.at(-1)}:null}
 function gastosDoMes(ym){
   const out=[];
   S.gastos.forEach(g=>{if(g.data.slice(0,7)===ym)out.push({tipo:'Gerais',valor:g.valor,cat:g.cat,pag:g.pag})});
   S.fixas.forEach(f=>{if(fixaAtiva(f,ym))out.push({tipo:'Fixos',valor:valorFixa(f,ym).v,cat:f.cat,pag:f.pag})});
   S.parcelas.forEach(p=>{const k=parcelaNoMes(p,ym);if(k)out.push({tipo:'Parcelados',valor:valorParcela(p,k),cat:p.cat,pag:p.pag})});
+  S.financ.forEach(f=>{if(parcFin(f,ym))out.push({tipo:'Financiamento',valor:valorFin(f,ym).v,cat:'Financiamento',pag:f.pag})});
   return out;
 }
 // guardado: valor digitado no mês ou, se não houver, o último informado antes
@@ -256,13 +276,18 @@ function itensCartao(cid,ym){const out=[];
   S.gastos.forEach(g=>{if(g.pag===cid&&g.data.slice(0,7)===ym)out.push({tipo:'Gerais',desc:g.desc||g.cat,sub:dataBR(g.data).slice(0,5)+' · '+g.cat,valor:g.valor})});
   S.fixas.forEach(f=>{if(f.pag===cid&&fixaAtiva(f,ym))out.push({tipo:'Fixos',desc:f.nome,sub:'Fixo · '+f.cat,valor:valorFixa(f,ym).v})});
   S.parcelas.forEach(p=>{const k=parcelaNoMes(p,ym);if(p.pag===cid&&k)out.push({tipo:'Parcelados',desc:p.desc,sub:`Parcela ${k}/${p.n} · ${p.cat}`,valor:valorParcela(p,k)})});
+  S.financ.forEach(f=>{const k=parcFin(f,ym);if(f.pag===cid&&k)out.push({tipo:'Parcelados',desc:f.nome,sub:`Financiamento ${k}/${f.n}`,valor:valorFin(f,ym).v})});
   return out}
 const cartaoPago=(cid,ym)=>!!(S.cartPago[ym]||{})[cid];
 const ehCartao=id=>forma(id).cartao;
 // contas a pagar no mês: faturas dos cartões + fixos fora do crédito
-function contasDoMes(ym){const cs=cartoes().map(c=>({tipo:'cartao',id:c.id,nome:'Fatura '+c.nome,valor:soma(itensCartao(c.id,ym)),pago:cartaoPago(c.id,ym),n:itensCartao(c.id,ym).length})).filter(c=>c.valor>0);
-  const fs=S.fixas.filter(f=>fixaAtiva(f,ym)&&!ehCartao(f.pag)).sort((a,b)=>(a.dia||99)-(b.dia||99)).map(f=>({tipo:'fixa',id:f.id,nome:f.nome,dia:f.dia,pag:f.pag,valor:valorFixa(f,ym).v,est:valorFixa(f,ym).est,pago:!!regFixa(f,ym).pago}));
-  return{cs,fs}}
+function vencData(ym,dia){if(!dia)return null;const[y,m]=ym.split('-').map(Number);return `${ym}-${pad(Math.min(dia,lastDay(y,m)))}`}
+function contasDoMes(ym){
+  const cs=cartoes().map(c=>{const its=itensCartao(c.id,ym);return{tipo:'cartao',id:c.id,nome:'Fatura '+c.nome,valor:soma(its),pago:cartaoPago(c.id,ym),n:its.length,dia:c.venc||null,sub:`${its.length} ite${its.length>1?'ns':'m'} no cartão`}}).filter(c=>c.valor>0);
+  const fs=S.fixas.filter(f=>fixaAtiva(f,ym)&&!ehCartao(f.pag)).map(f=>{const vf=valorFixa(f,ym);return{tipo:'fixa',id:f.id,nome:f.nome,dia:f.dia,valor:vf.v,est:vf.est,pago:!!regFixa(f,ym).pago,sub:nomePag(f.pag)}});
+  const fn=S.financ.filter(f=>parcFin(f,ym)&&!ehCartao(f.pag)).map(f=>{const vf=valorFin(f,ym);return{tipo:'fin',id:f.id,nome:f.nome,dia:f.dia,valor:vf.v,est:vf.est,pago:!!regFin(f,ym).pago,sub:`Parcela ${parcFin(f,ym)}/${f.n} · ${nomePag(f.pag)}`}});
+  const todas=[...cs,...fs,...fn].map(c=>({...c,venc:vencData(ym,c.dia)})).sort((a,b)=>(a.venc||'9999').localeCompare(b.venc||'9999'));
+  return{cs,fs:[...fs,...fn],todas}}
 const entradasDoMes=ym=>S.entradas.filter(e=>e.data.slice(0,7)===ym);
 const soma=(arr,f=x=>x.valor)=>r2(arr.reduce((s,x)=>s+f(x),0));
 
@@ -286,7 +311,7 @@ function render(){
   $('title').textContent=TITULOS[UI.tab];
   $('monthBar').style.display=UI.tab==='ajustes'?'none':'flex';
   $('monthLbl').textContent=nomeMes(UI.mes);
-  $(UI.tab).innerHTML=({entradas:vEntradas,fixas:vFixas,parcelas:vParcelas,gastos:vGastos,cartoes:vCartoes,contas:vContas,resultado:vResultado,ajustes:vAjustes})[UI.tab]();
+  $(UI.tab).innerHTML=({entradas:vEntradas,fixas:vFixas,parcelas:vParcelas,gastos:vGastos,financ:vFinanc,cartoes:vCartoes,contas:vContas,resultado:vResultado,ajustes:vAjustes})[UI.tab]();
 }
 
 /* ---------- peças de formulário ---------- */
@@ -400,10 +425,10 @@ function blocoGuardado(ym){const g=guardadoMes(ym),ant=guardadoMes(addMes(ym,-1)
 function vResultado(){
   const ym=UI.mes,ent=entradasDoMes(ym),gs=gastosDoMes(ym);
   const R=soma(ent),G=soma(gs),sobra=r2(R-G);
-  const porTipo={Gerais:0,Fixos:0,Parcelados:0},porPag={},porCat={},porEnt={};
+  const porTipo={Gerais:0,Fixos:0,Parcelados:0,Financiamento:0},porPag={},porCat={},porEnt={};
   gs.forEach(x=>{porTipo[x.tipo]+=x.valor;const pn=nomePag(x.pag);porPag[pn]=r2((porPag[pn]||0)+x.valor);porCat[x.cat]=r2((porCat[x.cat]||0)+x.valor)});
   ent.forEach(x=>porEnt[x.cat]=r2((porEnt[x.cat]||0)+x.valor));
-  const tipos=Object.entries(porTipo);
+  const tipos=Object.entries(porTipo).filter(([k,v])=>v||k!=='Financiamento');
   const pend=S.fixas.filter(f=>fixaAtiva(f,ym)&&valorFixa(f,ym).est);
   const cg=contasDoMes(ym),naoPagos=[...cg.cs,...cg.fs].filter(c=>!c.pago);
   // comparação com o mês anterior
@@ -443,17 +468,66 @@ function vCartoes(){
   <div class="hint" style="text-align:center">O pagamento da fatura é marcado em <button class="linkbtn" onclick="A.ir('contas')">Contas gerais ›</button></div>`;
 }
 function vContas(){
-  const{cs,fs}=contasDoMes(UI.mes),todas=[...cs,...fs];
+  const{todas}=contasDoMes(UI.mes),h=hoje();
   const tot=soma(todas),pago=soma(todas.filter(c=>c.pago)),falta=r2(tot-pago);
-  const li=c=>`<li><div class="g"><div class="t">${esc(c.nome)}${c.est?'<span class="pill warn">a confirmar</span>':''}</div><div class="s">${c.tipo==='cartao'?`${c.n} ite${c.n>1?'ns':'m'} · gerais, fixos e parcelas`:`${c.dia?'Dia '+c.dia+' · ':''}${esc(nomePag(c.pag))}`}</div></div><div class="v" style="${c.pago?'color:var(--muted);text-decoration:line-through':''}">${fmt(c.valor)}</div>
+  const vencidas=todas.filter(c=>!c.pago&&c.venc&&c.venc<h);
+  const tag=c=>{if(!c.venc)return c.tipo==='cartao'?`<button class="linkbtn" onclick="A.vencCartao('${c.id}')">definir vencimento</button>`:'sem data';
+    const d=dataBR(c.venc).slice(0,5);if(c.pago)return 'vence '+d;
+    if(c.venc<h)return `<span class="pill warn" style="margin:0">vencida ${d}</span>`;if(c.venc===h)return `<span class="pill warn" style="margin:0">vence hoje</span>`;
+    const dd=Math.round((new Date(c.venc)-new Date(h))/864e5);return dd<=3?`<span class="pill ok" style="margin:0">vence ${d}</span>`:'vence '+d};
+  const li=c=>`<li><div class="g"><div class="t">${esc(c.nome)}${c.est?'<span class="pill warn">a confirmar</span>':''}</div><div class="s">${tag(c)} · ${esc(c.sub)}</div></div><div class="v" style="${c.pago?'color:var(--muted);text-decoration:line-through':''}">${fmt(c.valor)}</div>
     <label class="check"><input type="checkbox" ${c.pago?'checked':''} onchange="A.pagarConta('${c.tipo}','${c.id}',this.checked)"></label></li>`;
-  return `<div class="result ${falta>0?'':''}"><div class="lbl">${falta>0?'Falta pagar':'Tudo pago ✓'}</div><div class="val">${fmt(falta)}</div>
-    ${tot?`<div class="bar" style="margin-top:10px;background:var(--card)"><i style="width:${pago/tot*100}%;background:var(--accent)"></i></div><div class="hint">${fmt(pago)} pago de ${fmt(tot)}</div>`:''}</div>
-  <div class="lhead"><span>Faturas dos cartões</span><b>${fmt(soma(cs))}</b></div>
-  <ul class="list">${cs.length?cs.map(li).join(''):'<li class="empty">Nenhuma fatura neste mês</li>'}</ul>
-  <div class="lhead"><span>Contas fixas (fora do cartão)</span><b>${fmt(soma(fs))}</b></div>
-  <ul class="list">${fs.length?fs.map(li).join(''):'<li class="empty">Nenhuma conta fixa fora do cartão</li>'}</ul>
-  <div class="hint">Gastos gerais pagos no Pix, débito ou dinheiro já saem na hora, por isso não aparecem aqui.</div>`;
+  return `<div class="result ${vencidas.length?'neg':''}"><div class="lbl">${falta>0?'Falta pagar':'Tudo pago ✓'}</div><div class="val">${fmt(falta)}</div>
+    ${tot?`<div class="bar" style="margin-top:10px;background:var(--card)"><i style="width:${pago/tot*100}%;background:var(--accent)"></i></div><div class="hint">${fmt(pago)} pago de ${fmt(tot)}${vencidas.length?` · <b style="color:var(--warn)">${vencidas.length} vencida${vencidas.length>1?'s':''}</b>`:''}</div>`:''}</div>
+  <div class="lhead"><span>Contas de ${nomeMes(UI.mes).toLowerCase()} por vencimento</span><b>${fmt(tot)}</b></div>
+  <ul class="list">${todas.length?todas.map(li).join(''):'<li class="empty">Nenhuma conta neste mês</li>'}</ul>
+  <div class="hint">Aqui entram as faturas dos cartões, os gastos fixos e o financiamento pagos fora do cartão. O vencimento do cartão é definido em Ajustes (ou no link acima); o dos fixos, no cadastro de cada um.</div>`;
+}
+function vFinanc(){
+  const id=UI.edit.fin,f=id?S.financ.find(x=>x.id===id):null,mostrarForm=UI.finForm||f||!S.financ.length;
+  const fixFin=S.fixas.filter(x=>x.cat==='Financiamento');
+  const form=`<div class="card"><h2>${f?'Editar financiamento':'Novo financiamento'}</h2><div class="grid">
+    ${campoTexto('nn',f?.nome,'Nome','Ex.: Apartamento — Caixa')}
+    ${campoValor('nvf',f?.financiado,'Valor financiado (opcional)')}
+    ${campoValor('nv',f?.valor,'Valor atual da parcela')}
+    <div><label>Nº total de parcelas</label><div class="field"><input id="nnp" inputmode="numeric" placeholder="Ex.: 360" value="${f?.n||''}"></div></div>
+    <div><label>Parcela atual (deste mês)</label><div class="field"><input id="nka" inputmode="numeric" placeholder="Ex.: 25" value="${f?difMes(f.inicio,UI.mes)+1:''}"></div></div>
+    <div><label>Dia do vencimento</label><div class="field"><input id="nd" inputmode="numeric" placeholder="Ex.: 15" value="${f?.dia||''}"></div></div>
+    <div><label>Sistema</label><div class="field"><select id="ns">${['SAC','Price','Outro'].map(x=>`<option ${f?.sistema===x?'selected':''}>${x}</option>`).join('')}</select></div></div>
+    <div><label>Taxa de juros (%)</label><div class="field"><input id="nj" inputmode="decimal" placeholder="Ex.: 9,5" value="${f?.juros?num(f.juros).replace(/,?0+$/,''):''}"></div></div>
+    <div><label>Período da taxa</label><div class="field"><select id="njt"><option value="aa" ${f?.jurosTipo!=='am'?'selected':''}>ao ano</option><option value="am" ${f?.jurosTipo==='am'?'selected':''}>ao mês</option></select></div></div>
+    ${campoValor('nx',f?.extras,'Seguros e taxas por mês')}
+    <div>${campoPag('np',f?f.pag:'dauto')}</div>
+  </div><div class="hint">Com a taxa de juros, o sistema (SAC ou Price) e o valor financiado ou o saldo devedor, o app calcula a parcela aproximada de cada mês. Os seguros e taxas do contrato (MIP, DFI, tarifa) são somados. Correção pela TR/IPCA não entra, então digite o valor real quando chegar o boleto. Se não souber a taxa, deixe em branco e digite a parcela todo mês.</div>
+  <div class="btns">${f?`<button class="btn del" onclick="A.excluirFin('${f.id}')">Excluir</button>`:''}${f||S.financ.length?`<button class="btn ghost" onclick="A.fecharFin()">Cancelar</button>`:''}<button class="btn" onclick="A.salvarFin()">${f?'Salvar alteração':'Adicionar'}</button></div></div>`;
+  const bloco=x=>{const k=parcFin(x,UI.mes),vf=valorFin(x,UI.mes),r=regFin(x,UI.mes),fim=addMes(x.inicio,x.n-1);
+    const pagas=Object.keys(S.finMes).filter(m=>S.finMes[m][x.id]&&S.finMes[m][x.id].pago&&parcFin(x,m));
+    const totPago=soma(pagas,m=>valorFin(x,m).v),sd=saldoFin(x,UI.mes);
+    const hist=Object.keys(S.finMes).filter(m=>S.finMes[m][x.id]&&parcFin(x,m)&&m!==UI.mes).sort().reverse();if(k)hist.unshift(UI.mes);
+    const ant=addMes(UI.mes,-1),vAnt=parcFin(x,ant)?valorFin(x,ant).v:null;
+    return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px"><h2 style="margin:0">${esc(x.nome)}</h2><button class="linkbtn" onclick="A.editarFin('${x.id}')">editar</button></div>
+    <div class="hint" style="margin-top:2px">${[x.sistema&&x.sistema!=='Outro'?x.sistema:'',x.financiado?'financiado '+fmt(x.financiado):''].filter(Boolean).map(t=>t+' · ').join('')}vence dia ${x.dia||'—'} · ${esc(nomePag(x.pag))}${x.juros?` · juros ${num(x.juros).replace(/,?0+$/,'')}% ${x.jurosTipo==='am'?'a.m.':'a.a.'} (${num(taxaMes(x)*100).replace(/,?0+$/,'')}% a.m.)`:''}</div>
+    ${k?`<div style="display:flex;justify-content:space-between;margin-top:14px;font-size:13px;color:var(--muted)"><span>Parcela <b style="color:var(--ink)">${k}</b> de ${x.n}</span><span>${Math.round(k/x.n*100)}%</span></div>
+    <div class="bar" style="margin-top:6px"><i style="width:${k/x.n*100}%;background:var(--accent)"></i></div>
+    <ul class="list" style="margin:14px 0 0"><li><div class="g"><div class="t">${curto(UI.mes)}${vf.est?`<span class="pill warn">${vf.calc?'calculada':'a confirmar'}</span>`:''}</div><div class="s">${!vf.est&&calcFin(x,UI.mes)?'cálculo: '+fmt(calcFin(x,UI.mes).v)+' · ':''}${vAnt!=null?(vf.v>vAnt?'▲ ':vf.v<vAnt?'▼ ':'= ')+fmt(Math.abs(r2(vf.v-vAnt)))+' vs mês anterior':'primeira parcela'}</div></div>
+      <div class="field mini"><span>R$</span><input inputmode="decimal" value="${num(vf.v)}" onfocus="this.select()" onchange="A.finMes('${x.id}','v',this.value)"></div>
+      ${ehCartao(x.pag)?'':`<label class="check" title="Pago"><input type="checkbox" ${r.pago?'checked':''} onchange="A.finPago('${x.id}',this.checked)"></label>`}</li>
+      <li><div class="g"><div class="t">Saldo devedor</div><div class="s">${sd&&sd.de===UI.mes?'informado neste mês':calcFin(x,UI.mes)?'estimado após esta parcela: '+fmt(calcFin(x,UI.mes).saldo):sd?'último: '+curto(sd.de):'opcional — copie do extrato'}</div></div>
+      <div class="field mini" style="width:150px"><span>R$</span><input inputmode="decimal" placeholder="${sd&&sd.de!==UI.mes?num(sd.v):'0,00'}" value="${sd&&sd.de===UI.mes?num(sd.v):''}" onfocus="this.select()" onchange="A.finMes('${x.id}','saldo',this.value)"></div></li></ul>
+    <div class="stats" style="margin:12px 0 0"><div class="stat"><div class="lbl">Faltam</div><div class="v">${x.n-k} parcela${x.n-k===1?'':'s'}</div></div><div class="stat"><div class="lbl">Termina em</div><div class="v">${curto(fim)}</div></div>
+      <div class="stat"><div class="lbl">Total pago (registrado)</div><div class="v">${fmt(totPago)}</div></div><div class="stat"><div class="lbl">${sd?'Saldo devedor':'Parcelas pagas'}</div><div class="v">${sd?fmt(sd.v):pagas.length}</div></div></div>
+    ${(()=>{if(!taxaMes(x)||!calcFin(x,UI.mes))return '';const prox=[];let totR=0;for(let m=addMes(UI.mes,1);parcFin(x,m);m=addMes(m,1)){const c=calcFin(x,m);if(!c)break;totR+=c.v;if(prox.length<12)prox.push([m,c.v])}
+      return `<div class="stats" style="margin:10px 0 0"><div class="stat" style="grid-column:1/-1"><div class="lbl">Ainda a pagar, estimado (${x.n-k} parcelas, sem TR/IPCA)</div><div class="v">${fmt(r2(totR))}</div></div></div>
+      <details style="margin-top:12px"><summary class="linkbtn" style="list-style:none;cursor:pointer">Próximas 12 parcelas (estimativa) ›</summary><ul class="list" style="margin:10px 0 0">${prox.map(([m,v])=>`<li><div class="g"><div class="t">${parcFin(x,m)}/${x.n} · ${curto(m)}</div></div><div class="v" style="color:var(--muted)">${fmt(v)}</div></li>`).join('')}</ul></details>`})()}
+    <details style="margin-top:12px"><summary class="linkbtn" style="list-style:none;cursor:pointer">Histórico de parcelas registradas ›</summary><ul class="list" style="margin:10px 0 0">${hist.map(m=>{const v=valorFin(x,m),rr=regFin(x,m);return `<li><div class="g"><div class="t">${parcFin(x,m)}/${x.n} · ${curto(m)}</div><div class="s">${rr.pago?'pago':'não marcado'}${v.est?' · estimado':''}${rr.saldo!=null?' · saldo '+fmt(rr.saldo):''}</div></div><div class="v" style="${v.est?'color:var(--muted)':''}">${fmt(v.v)}</div></li>`}).join('')}</ul></details>`
+    :`<div class="hint">${x.inicio>UI.mes?'Começa em '+curto(x.inicio):'Quitado em '+curto(fim)+' 🎉'}</div>`}</div>`};
+  const ativos=S.financ.filter(x=>parcFin(x,UI.mes)),totMes=soma(ativos,x=>valorFin(x,UI.mes).v);
+  return `${S.financ.length>1&&ativos.length?`<div class="result"><div class="lbl">Financiamentos em ${nomeMes(UI.mes).toLowerCase()}</div><div class="val">${fmt(totMes)}</div></div>`:''}
+  ${fixFin.length?`<div class="card"><h2>Trazer do Gastos fixos</h2><div class="hint" style="margin-top:0">${fixFin.map(x=>`<b>${esc(x.nome)}</b>`).join(', ')} está em Gastos fixos. Transfira para cá para controlar as parcelas (os valores já digitados vêm junto).</div>
+    <div class="btns">${fixFin.map(x=>`<button class="btn ghost" onclick="A.trazerFixa('${x.id}')">Transferir ${esc(x.nome)}</button>`).join('')}</div></div>`:''}
+  ${mostrarForm?form:''}
+  ${S.financ.filter(x=>x.id!==id).map(bloco).join('')}
+  ${!mostrarForm?`<button class="btn ghost" style="width:100%" onclick="A.novoFin()">＋ Novo financiamento</button>`:''}`;
 }
 function vAjustes(){
   const tags=(lista,tipo)=>`<div class="tags">${lista.map((c,i)=>`<button onclick="A.editCat('${tipo}',${i})">${esc(c)}</button>`).join('')}<button class="add" onclick="A.addCat('${tipo}')">＋ Nova</button></div>`;
@@ -493,7 +567,30 @@ const A={
     if(id)Object.assign(S[LISTA[tipo]].find(x=>x.id===id),o);else S[LISTA[tipo]].push({id:uid(),criado:Date.now(),...o});
     UI.edit[tipo]=null;UI.modoParc=null;salvar();render();A.prevParc();toast(id?'Alterado':'Adicionado');
   },
-  pagarConta(tipo,id,ok){if(tipo==='fixa')return A.pagoFixa(id,ok);const m=S.cartPago[UI.mes]=S.cartPago[UI.mes]||{};if(ok)m[id]=true;else delete m[id];salvar();render()},
+  pagarConta(tipo,id,ok){if(tipo==='fixa')return A.pagoFixa(id,ok);if(tipo==='fin')return A.finPago(id,ok);const m=S.cartPago[UI.mes]=S.cartPago[UI.mes]||{};if(ok)m[id]=true;else delete m[id];salvar();render()},
+  vencCartao(id){perguntar('Dia de vencimento da fatura (1 a 31)',forma(id).venc||'',v=>{const d=parseInt(v,10);if(!(d>=1&&d<=31))return toast('Dia inválido');forma(id).venc=d;salvar();render()})},
+  novoFin(){UI.finForm=true;UI.edit.fin=null;render();window.scrollTo(0,0)},
+  editarFin(id){UI.edit.fin=id;UI.finForm=false;render();window.scrollTo({top:0,behavior:'smooth'})},
+  fecharFin(){UI.edit.fin=null;UI.finForm=false;render()},
+  salvarFin(){const id=UI.edit.fin,nome=$('nn').value.trim();if(!nome)return toast('Informe o nome');
+    const n=parseInt($('nnp').value,10),k=parseInt($('nka').value,10),dia=parseInt($('nd').value,10),juros=lerValor($('nj').value),fin=lerValor($('nvf').value);let v=lerValor($('nv').value);
+    if(!(n>0))return toast('Informe o nº total de parcelas');if(!(k>=1&&k<=n))return toast('Parcela atual deve ser entre 1 e '+n);const tmp={n,inicio:addMes(UI.mes,-(k-1)),financiado:fin||null,juros,jurosTipo:$('njt').value,sistema:$('ns').value,extras:lerValor($('nx').value),id:id||'_'};
+    if(!v){const c=calcFin(tmp,UI.mes);if(c)v=c.v;else return toast('Informe o valor da parcela, ou taxa de juros + valor financiado')}
+    const o={nome,n,valor:v,juros:juros||null,jurosTipo:$('njt').value,extras:lerValor($('nx').value)||0,financiado:fin||null,inicio:addMes(UI.mes,-(k-1)),dia:dia>=1&&dia<=31?dia:null,sistema:$('ns').value,pag:$('np').value};
+    if(id)Object.assign(S.financ.find(x=>x.id===id),o);else S.financ.push({id:uid(),...o});
+    A.fecharFin();salvar();render();toast(id?'Alterado':'Financiamento adicionado')},
+  excluirFin(id){confirmar('Excluir este financiamento e todo o histórico de parcelas?',()=>{S.financ=S.financ.filter(x=>x.id!==id);Object.values(S.finMes).forEach(m=>delete m[id]);A.fecharFin();salvar();render()})},
+  finMes(id,campo,txt){const m=S.finMes[UI.mes]=S.finMes[UI.mes]||{},r=m[id]=m[id]||{};const t=String(txt).trim();if(!t)delete r[campo];else r[campo]=lerValor(t);salvar();render()},
+  finPago(id,ok){const m=S.finMes[UI.mes]=S.finMes[UI.mes]||{},r=m[id]=m[id]||{};r.pago=ok;if(ok&&r.v==null)r.v=valorFin(S.financ.find(f=>f.id===id),UI.mes).v;salvar();render()},
+  trazerFixa(fid){const fx=S.fixas.find(x=>x.id===fid);
+    const d=document.createElement('div');d.className='dlg';d.innerHTML=`<div class="box"><p>Transferir <b>${esc(fx.nome)}</b></p><div class="grid"><div><label>Nº total de parcelas</label><div class="field"><input id="tn" inputmode="numeric" placeholder="Ex.: 360"></div></div><div><label>Parcela de ${curto(UI.mes)}</label><div class="field"><input id="tk" inputmode="numeric" placeholder="Ex.: 25"></div></div></div>
+      <div class="btns"><button class="btn ghost" data-n>Cancelar</button><button class="btn" data-s>Transferir</button></div></div>`;
+    d.querySelector('[data-n]').onclick=()=>d.remove();
+    d.querySelector('[data-s]').onclick=()=>{const n=parseInt(d.querySelector('#tn').value,10),k=parseInt(d.querySelector('#tk').value,10);if(!(n>0&&k>=1&&k<=n))return toast('Confira os números');d.remove();
+      const f={id:uid(),nome:fx.nome,n,valor:valorFixa(fx,UI.mes).v,financiado:null,inicio:addMes(UI.mes,-(k-1)),dia:fx.dia,sistema:'Outro',pag:fx.pag};S.financ.push(f);
+      Object.entries(S.fixMes).forEach(([m,o])=>{if(o[fid]){(S.finMes[m]=S.finMes[m]||{})[f.id]={...o[fid]};delete o[fid]}});
+      S.fixas=S.fixas.filter(x=>x.id!==fid);salvar();render();toast('Transferido')};
+    document.body.appendChild(d)},
   valorFixaMes(id,s){const v=lerValor(s);const m=S.fixMes[UI.mes]=S.fixMes[UI.mes]||{};m[id]=Object.assign(m[id]||{},{v});salvar();render()},
   pagoFixa(id,ok){const m=S.fixMes[UI.mes]=S.fixMes[UI.mes]||{};const r=m[id]=m[id]||{};r.pago=ok;
     // ao marcar como pago, fixa o valor do mês (deixa de ser estimativa)
@@ -512,11 +609,11 @@ const A={
       sel.insertAdjacentHTML('afterbegin',`<option value="${f.id}">${esc(soCartao?n:nomePag(f.id))}</option>`);sel.value=f.id})},
   novoCartao(){perguntar('Nome do cartão de crédito (ex.: Nubank, Itaú)','',n=>{S.formas.push({id:uid(),nome:n,cartao:true});salvar();render();A.prevParc();toast('Cartão cadastrado')})},
   novaForma(){perguntar('Nome da forma de pagamento','',n=>{S.formas.push({id:uid(),nome:n,cartao:false});salvar();render()})},
-  editForma(id){const f=forma(id);const usos=S.gastos.filter(x=>x.pag===id).length+S.fixas.filter(x=>x.pag===id).length+S.parcelas.filter(x=>x.pag===id).length;
-    const d=document.createElement('div');d.className='dlg';d.innerHTML=`<div class="box"><p>${f.cartao?'Cartão de crédito':'Forma de pagamento'}</p><div class="field"><input value="${esc(f.nome)}"></div><div class="hint">${usos} lançamento(s) usam esta forma.</div>
+  editForma(id){const f=forma(id);const usos=S.gastos.filter(x=>x.pag===id).length+S.fixas.filter(x=>x.pag===id).length+S.parcelas.filter(x=>x.pag===id).length+S.financ.filter(x=>x.pag===id).length;
+    const d=document.createElement('div');d.className='dlg';d.innerHTML=`<div class="box"><p>${f.cartao?'Cartão de crédito':'Forma de pagamento'}</p><div class="field"><input value="${esc(f.nome)}"></div>${f.cartao?`<label style="margin-top:10px">Dia de vencimento da fatura</label><div class="field"><input id="fvenc" inputmode="numeric" placeholder="Ex.: 10" value="${f.venc||''}"></div>`:''}<div class="hint">${usos} lançamento(s) usam esta forma.</div>
       <div class="btns"><button class="btn del" data-x>Excluir</button><button class="btn ghost" data-n>Cancelar</button><button class="btn" data-s>Salvar</button></div></div>`;
     const i=d.querySelector('input');d.querySelector('[data-n]').onclick=()=>d.remove();d.onclick=e=>{if(e.target===d)d.remove()};
-    d.querySelector('[data-s]').onclick=()=>{const v=i.value.trim();if(v){f.nome=v;salvar();render()}d.remove()};
+    d.querySelector('[data-s]').onclick=()=>{const v=i.value.trim();if(v)f.nome=v;const ve=d.querySelector('#fvenc');if(ve){const dd=parseInt(ve.value,10);f.venc=dd>=1&&dd<=31?dd:null}salvar();render();d.remove()};
     d.querySelector('[data-x]').onclick=()=>{d.remove();if(usos)return toast('Em uso — não dá para excluir');if(S.formas.length<=1)return toast('Precisa ter ao menos uma');confirmar(`Excluir "${f.nome}"?`,()=>{S.formas=S.formas.filter(x=>x.id!==id);salvar();render()})};
     document.body.appendChild(d)},
   addCat(tipo){const l=tipo==='ent'?S.catEnt:S.cats;perguntar('Nome da nova categoria','',n=>{if(l.includes(n))return toast('Já existe');l.push(n);salvar();render()})},
@@ -543,6 +640,7 @@ const A={
       entradasDoMes(ym).forEach(e=>L.push([ym,dataBR(e.data),'Entrada',q(e.desc),q(e.cat),'','',n(e.valor)].join(';')));
       S.fixas.filter(f=>fixaAtiva(f,ym)).forEach(f=>L.push([ym,'','Fixo',q(f.nome),q(f.cat),q(nomePag(f.pag)),'',n(-valorFixa(f,ym).v)].join(';')));
       S.parcelas.forEach(p=>{const k=parcelaNoMes(p,ym);if(k)L.push([ym,'','Parcelado',q(p.desc),q(p.cat),q(nomePag(p.pag)),`${k}/${p.n}`,n(-valorParcela(p,k))].join(';'))});
+      S.financ.forEach(f=>{const k=parcFin(f,ym);if(k)L.push([ym,'','Financiamento',q(f.nome),'Financiamento',q(nomePag(f.pag)),`${k}/${f.n}`,n(-valorFin(f,ym).v)].join(';'))});
       S.gastos.filter(g=>g.data.slice(0,7)===ym).forEach(g=>L.push([ym,dataBR(g.data),'Gasto geral',q(g.desc),q(g.cat),q(nomePag(g.pag)),'',n(-g.valor)].join(';')))});
     Object.keys(S.guardado).sort().forEach(ym=>L.push([ym,'','Guardado (saldo)','','','','',n(S.guardado[ym])].join(';')));
     A.arquivo(`financas-${hoje()}.csv`,'﻿'+L.join('\r\n'),'text/csv')},
